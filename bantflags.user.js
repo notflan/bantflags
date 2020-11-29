@@ -53,16 +53,18 @@ let postNrs = []; // all post numbers in the thread.
 let board_id = ""; // The board we get flags for.
 let flagsLoaded = false;
 
+var enabled=true;
+
 const debug = text => {
-	if (debugMode)
-		console.log('[BantFlags] ' + text);
-}
+    if (debugMode)
+	console.log('[BantFlags] ' + text);
+};
 
 // Test unqiue CSS paths to figure out what board software we're using.
 const software = {
-	yotsuba: window.location.host === 'boards.4chan.org',
-	nodegucaDoushio: document.querySelector('b[id="sync"], span[id="sync"]') !== null,
-	foolfuuka: document.querySelector('div[id="main"] article header .post_data') !== null
+    yotsuba: window.location.host === 'boards.4chan.org',
+    nodegucaDoushio: document.querySelector('b[id="sync"], span[id="sync"]') !== null,
+    foolfuuka: document.querySelector('div[id="main"] article header .post_data') !== null
 };
 
 const makeElement = (tag, options) => Object.assign(document.createElement(tag), options);
@@ -73,303 +75,327 @@ const flagSource = flag => flag_dir + flag + '.png';
 const addStyle = css => document.head.appendChild(makeElement('style', { innerHTML: css }));
 
 const makeRequest = ((method, url, data, func) => {
-	xmlHttpRequest({
-		method: method,
-		url: url,
-		data: data,
-		headers: { "Content-Type": 'application/x-www-form-urlencoded' },
-		onload: func
-	});
+    xmlHttpRequest({
+	method: method,
+	url: url,
+	data: data,
+	headers: { "Content-Type": 'application/x-www-form-urlencoded' },
+	onload: func
+    });
 });
 
 /** Itterate over selected flags are store them across browser sessions.*/
 function saveFlags() {
-	regions = [];
-	const selectedFlags = document.querySelectorAll(".bantflags_flag");
+    regions = [];
+    const selectedFlags = document.querySelectorAll(".bantflags_flag");
 
-	for (let i = 0; i < selectedFlags.length; i++) {
-		regions[i] = selectedFlags[i].title;
-	}
+    for (let i = 0; i < selectedFlags.length; i++) {
+	regions[i] = selectedFlags[i].title;
+    }
 
-	setValue(namespace, regions);
+    setValue(namespace, regions);
 }
 
 /** Add a flag to our selection. */
 function setFlag(flag, save) {
-	const flagName = flag ? flag : document.querySelector('#flagSelect input').value;
-	const flagContainer = document.getElementById('bantflags_container');
+    const flagName = flag ? flag : document.querySelector('#flagSelect input').value;
+    const flagContainer = document.getElementById('bantflags_container');
 
-	flagContainer.appendChild(makeElement('img', {
-		title: flagName,
-		src: flagSource(flagName),
-		className: 'bantflags_flag',
-		onclick: function() {
-			flagContainer.removeChild(this);
-			if (flagsLoaded)
-				toggleFlagButton('on');
-			saveFlags();
-		}
-	}));
+    flagContainer.appendChild(makeElement('img', {
+	title: flagName,
+	src: flagSource(flagName),
+	className: 'bantflags_flag',
+	onclick: function() {
+	    flagContainer.removeChild(this);
+	    if (flagsLoaded)
+		toggleFlagButton('on');
+	    saveFlags();
+	}
+    }));
 
-	if (flagContainer.children.length >= max_flags)
-		toggleFlagButton('off');
-	
-	if (!flag || save === true) // We've added a new flag to our selection
-		saveFlags();	
+    if (flagContainer.children.length >= max_flags)
+	toggleFlagButton('off');
+    
+    if (!flag || save === true) // We've added a new flag to our selection
+	saveFlags();	
 }
 
+/// Should we post?
+const is_posting_enabled = () => enabled;
+
 function init() {
-	const flagsForm = makeElement('div', {
-		className: 'flagsForm',
-		innerHTML: '<span id="bantflags_container"></span><button type="button" id="append_flag_button" title="Click to add selected flag to your flags. Click on flags to remove them." disabled="true"><<</button><button id="flagLoad" type="button">Click to load flags.</button><div id="flagSelect" ><ul class="hide"></ul><input type="button" value="(You)" onclick=""></div>'
-	});
+    const flagsForm = makeElement('div', {
+	className: 'flagsForm',
+	innerHTML: '<span id="bantflags_container"></span><button type="button" id="append_flag_button" title="Click to add selected flag to your flags. Click on flags to remove them." disabled="true"><<</button><button id="flagLoad" type="button">Click to load flags.</button><div style="float:right; padding-top:0.25em;"><input id="_bf_enabled" type="checkbox" checked>Enabled</input></div><div id="flagSelect" ><ul class="hide"></ul><input type="button" value="(You)" onclick=""></div>'
+    });
+    
+    
+    // Where do we append the flagsForm to?
+    if (software.yotsuba) { document.getElementById('delform').appendChild(flagsForm); }
+    else if (software.nodegucaDoushio) { document.querySelector('section').insertAdjacentElement('afterEnd', flagsForm); }
 
-	// Where do we append the flagsForm to?
-	if (software.yotsuba) { document.getElementById('delform').appendChild(flagsForm); }
-	else if (software.nodegucaDoushio) { document.querySelector('section').insertAdjacentElement('afterEnd', flagsForm); }
-	
-	for (let i = 0; i < regions.length; i++) {
-		setFlag(regions[i]);
+    const cb_enabled = document.getElementById('_bf_enabled');
+    console.log("Enabled: "+enabled+" -> "+is_posting_enabled());
+    if(!enabled)
+	cb_enabled.removeAttribute("checked");
+    
+    cb_enabled.addEventListener("change", function() {
+	enabled = this.checked;
+	console.log("Setting enabled: "+enabled+" -> "+is_posting_enabled());
+	if(isGM4) {
+	    (async () => {
+		await setValue(namespace+"_enabled", enabled);
+	    })();
+	} else {
+	    setValue(namespace+"_enabled", enabled);
 	}
+    });
 
-	document.getElementById('flagLoad').addEventListener('click', makeFlagSelect, { once: true });
+
+    for (let i = 0; i < regions.length; i++) {
+	setFlag(regions[i]);
+    }
+
+    document.getElementById('flagLoad').addEventListener('click', makeFlagSelect, { once: true });
 }
 
 /** Get flag data from server and fill flags form. */
 function makeFlagSelect() {
-	makeRequest(
-		"GET",
-		api_flags,
-		"", // We can't send data, it's a GET request.
-		function (resp) {
-			debug('Loading flags.');
-			
-			if (resp.status !== 200) {
-				console.log('Couldn\'t get flag list from server')
-				return;
-			}
-			
-			let flagSelect = document.getElementById('flagSelect');
-			let flagInput = flagSelect.querySelector('input');
-			let flagList = flagSelect.querySelector('ul');
+    makeRequest(
+	"GET",
+	api_flags,
+	"", // We can't send data, it's a GET request.
+	function (resp) {
+	    debug('Loading flags.');
+	    
+	    if (resp.status !== 200) {
+		console.log('Couldn\'t get flag list from server');
+		return;
+	    }
+	    
+	    let flagSelect = document.getElementById('flagSelect');
+	    let flagInput = flagSelect.querySelector('input');
+	    let flagList = flagSelect.querySelector('ul');
 
-			let flags = resp.responseText.split('\n');
-			for (let i = 0; i < flags.length; i++) {
-				const flag = flags[i];
-				flagList.appendChild(makeElement('li',{
-					innerHTML: `<img src="${flagSource(flag)}" title="${flag}"><span>${flag}</span>`
-				}));
-			}			
+	    let flags = resp.responseText.split('\n');
+	    for (let i = 0; i < flags.length; i++) {
+		const flag = flags[i];
+		flagList.appendChild(makeElement('li',{
+		    innerHTML: `<img src="${flagSource(flag)}" title="${flag}"><span>${flag}</span>`
+		}));
+	    }			
 
-			flagSelect.addEventListener('click', e => {
-				// Maybe we clicked the flag image
-				const node = e.target.nodeName === 'LI' ? e.target : e.target.parentNode;
-				if (node.nodeName === 'LI')
-					flagInput.value = node.querySelector('span').innerHTML;
-				
-				flagList.classList.toggle('hide');
-			});
+	    flagSelect.addEventListener('click', e => {
+		// Maybe we clicked the flag image
+		const node = e.target.nodeName === 'LI' ? e.target : e.target.parentNode;
+		if (node.nodeName === 'LI')
+		    flagInput.value = node.querySelector('span').innerHTML;
+		
+		flagList.classList.toggle('hide');
+	    });
 
-			const flagButton = document.getElementById('append_flag_button');
-			flagButton.addEventListener('click', () => setFlag());
-			flagButton.disabled = false;
-			
-			document.getElementById('flagLoad').style.display = 'none';
-			document.querySelector('.flagsForm').style.marginRight = "200px"; // flagsForm has position: absolute and is ~200px long.
-			flagSelect.style.display = 'inline-block';
-			flagsLoaded = true;
-		});
+	    const flagButton = document.getElementById('append_flag_button');
+	    flagButton.addEventListener('click', () => setFlag());
+	    flagButton.disabled = false;
+	    
+	    document.getElementById('flagLoad').style.display = 'none';
+	    document.querySelector('.flagsForm').style.marginRight = "200px"; // flagsForm has position: absolute and is ~200px long.
+	    flagSelect.style.display = 'inline-block';
+	    flagsLoaded = true;
+	});
 }
 
 /** add all of the post numbers on the page to postNrs. */
 function getPosts(selector) {
-	const posts = document.querySelectorAll(selector);
+    const posts = document.querySelectorAll(selector);
 
-	for (let i = 0; i < posts.length; i++) {
-		const postNumber = software.yotsuba
-					? posts[i].id.substr(2) // Fuck you 4chan.
-					: posts[i].id;
+    for (let i = 0; i < posts.length; i++) {
+	const postNumber = software.yotsuba
+	      ? posts[i].id.substr(2) // Fuck you 4chan.
+	      : posts[i].id;
 
-		postNrs.push(postNumber);
-	}
-	debug(postNrs);
+	postNrs.push(postNumber);
+    }
+    debug(postNrs);
 }
 
 /** Get flags from the database using values in postNrs and pass the response on to onFlagsLoad */
 function resolveFlags() {
-	makeRequest(
-		'POST',
-		api_get,
-		'post_nrs=' + encodeURIComponent(postNrs) + '&board=' + encodeURIComponent(board_id) + '&version=' + version,
-		function (resp) {
-			if (resp.status !== 200) {
-				console.log('[bantflags] Couldn\'t load flags. Refresh the page');
-				debug(resp.responseText);
-				return;
-			}
+    makeRequest(
+	'POST',
+	api_get,
+	'post_nrs=' + encodeURIComponent(postNrs) + '&board=' + encodeURIComponent(board_id) + '&version=' + version,
+	function (resp) {
+	    if (resp.status !== 200) {
+		console.log('[bantflags] Couldn\'t load flags. Refresh the page');
+		debug(resp.responseText);
+		return;
+	    }
 
-			const jsonData = JSON.parse(resp.responseText);
-			debug(`JSON: ${resp.responseText}`);
-			
-			Object.keys(jsonData).forEach(post => {
-				const flags = jsonData[post];
+	    const jsonData = JSON.parse(resp.responseText);
+	    debug(`JSON: ${resp.responseText}`);
+	    
+	    Object.keys(jsonData).forEach(post => {
+		const flags = jsonData[post];
 
-				if (flags.length <= 0) return;
-				
-				debug(`Resolving flags for >>${post}`);
+		if (flags.length <= 0) return;
+		
+		debug(`Resolving flags for >>${post}`);
 
-				let flagContainer;
-				if (software.yotsuba) { flagContainer = document.querySelector(`[id="pc${post}"] .postInfo .nameBlock`); }
-				else if (software.foolfuuka) { flagContainer = document.querySelector(`[id="${post}"] .post_data .post_type`); }
-				else if (software.nodegucaDoushio) { flagContainer = document.querySelector(`[id="${post}"] header`); }
-				
-				for (let i = 0; i < flags.length; i++) {
-					const flag = flags[i];
-					
-					flagContainer.append(makeElement('a', {
-						innerHTML: `<img src="${flagSource(flag)}" title="${flag}">`,
-						className: 'bantFlag',
-						target: '_blank',
-						title: flag
-					}));
+		let flagContainer;
+		if (software.yotsuba) { flagContainer = document.querySelector(`[id="pc${post}"] .postInfo .nameBlock`); }
+		else if (software.foolfuuka) { flagContainer = document.querySelector(`[id="${post}"] .post_data .post_type`); }
+		else if (software.nodegucaDoushio) { flagContainer = document.querySelector(`[id="${post}"] header`); }
+		
+		for (let i = 0; i < flags.length; i++) {
+		    const flag = flags[i];
+		    
+		    flagContainer.append(makeElement('a', {
+			innerHTML: `<img src="${flagSource(flag)}" title="${flag}">`,
+			className: 'bantFlag',
+			target: '_blank',
+			title: flag
+		    }));
 
-					debug(`\t -> ${flag}`);
-				}
-			});
+		    debug(`\t -> ${flag}`);
+		}
+	    });
 
-			postNrs = [];
-		});
+	    postNrs = [];
+	});
 }
 
 function main() {
-	if (!regions) {
-		regions = [];
-	}
-	
-	// See Docs/styles.css
-	addStyle('.bantFlag{padding: 0px 0px 0px 5px; display: inline-block; width: 16px; height: 11px; position: relative;} .bantflags_flag{padding: 1px;} [title^="Romania"]{ position: relative; animation: shakeAnim 0.1s linear infinite;} @keyframes shakeAnim{ 0% {left: 1px;} 25% {top: 2px;} 50% {left: 1px;} 75% {left: 0px;} 100% {left: 2px;}}.flagsForm{float: right; clear: right; margin: 0 20px 10px 0;} #flagSelect{display:none;}	 #flagSelect ul{list-style-type: none;padding: 0;margin-bottom: 0;cursor: pointer;bottom: 100%;height: 200px;overflow: auto;position: absolute;width:200px;background-color:#fff} #flagSelect ul li {display: block;} #flagSelect ul li:hover {background-color: #ddd;}#flagSelect {position: absolute;}#flagSelect input {width: 200px;} #flagSelect .hide {display: none;}#flagSelect img {margin-left: 2px;}')
+    if (!regions) {
+	regions = [];
+    }
+    
+    // See Docs/styles.css
+    addStyle('.bantFlag{padding: 0px 0px 0px 5px; display: inline-block; width: 16px; height: 11px; position: relative;} .bantflags_flag{padding: 1px;} [title^="Romania"]{ position: relative; animation: shakeAnim 0.1s linear infinite;} @keyframes shakeAnim{ 0% {left: 1px;} 25% {top: 2px;} 50% {left: 1px;} 75% {left: 0px;} 100% {left: 2px;}}.flagsForm{float: right; clear: right; margin: 0 20px 10px 0;} #flagSelect{display:none;}	 #flagSelect ul{list-style-type: none;padding: 0;margin-bottom: 0;cursor: pointer;bottom: 100%;height: 200px;overflow: auto;position: absolute;width:200px;background-color:#fff} #flagSelect ul li {display: block;} #flagSelect ul li:hover {background-color: #ddd;}#flagSelect {position: absolute;}#flagSelect input {width: 200px;} #flagSelect .hide {display: none;}#flagSelect img {margin-left: 2px;}');
 
-	if (software.yotsuba) {
-		getPosts('.postContainer');
+    if (software.yotsuba) {
+	getPosts('.postContainer');
 
-		addStyle('.flag{top: 0px;left: -1px}');
-		init();
-	}
+	addStyle('.flag{top: 0px;left: -1px}');
+	init();
+    }
 
-	else if (software.nodegucaDoushio) {
-		getPosts('section[id], article[id]');
+    else if (software.nodegucaDoushio) {
+	getPosts('section[id], article[id]');
 
-		addStyle('.bantFlag {cursor: default} .bantFlag img {pointer-events: none;}');
-		init();
-	}
+	addStyle('.bantFlag {cursor: default} .bantFlag img {pointer-events: none;}');
+	init();
+    }
 
-	else if (software.foolfuuka) {
-		getPosts('article[id]');
+    else if (software.foolfuuka) {
+	getPosts('article[id]');
 
-		addStyle('.bantFlag{top: -2px !important;left: -1px !important}');
-	}
-	
-	board_id = window.location.pathname.split('/')[1];
-	debug(`board: ${board_id}`);
+	addStyle('.bantFlag{top: -2px !important;left: -1px !important}');
+    }
+    
+    board_id = window.location.pathname.split('/')[1];
+    debug(`board: ${board_id}`);
 
-	try {
-		resolveFlags();
-	}
-	catch (fuckywucky) {
-		console.log(`Wah! Manx fucked something up ;~;\nPoke him somewhere with this:\n${fuckywucky}`)
-	}
+    try {
+	resolveFlags();
+    }
+    catch (fuckywucky) {
+	console.log(`Wah! Manx fucked something up ;~;\nPoke him somewhere with this:\n${fuckywucky}`);
+    }
 }
 
 document.addEventListener('dblclick', e => {
-	if (e.target.parentNode.classList.contains('bantFlag')) {
-		setFlag(e.target.title, true);
-	}
+    if (e.target.parentNode.classList.contains('bantFlag')) {
+	setFlag(e.target.title, true);
+    }
 });
 
 if (isGM4) { // Fuck you GreaseMonkey
-	(async () => {
-		regions = await getValue(namespace);
-		main();
-	})();
+    (async () => {
+	regions = await getValue(namespace);
+	enabled = !!await getValue(namespace+"_enabled");
+	main();
+    })();
 }
 else {
-	regions = getValue(namespace);
-	main();
+    regions = getValue(namespace);
+    enabled = !!getValue(namespace+"_enabled");
+    main();
 }
 
-const postFlags = (post_nr, func = resp => debug(resp.responseText)) => makeRequest(
-	'POST',
-	api_post,
-	`post_nr=${encodeURIComponent(post_nr)}&board=${encodeURIComponent(board_id)}&regions=${encodeURIComponent(regions)}&version=${version}`,
-	func);
+const postFlags = (post_nr, func = resp => debug(resp.responseText)) => is_posting_enabled() ? makeRequest(
+    'POST',
+    api_post,
+    `post_nr=${encodeURIComponent(post_nr)}&board=${encodeURIComponent(board_id)}&regions=${encodeURIComponent(regions)}&version=${version}`,
+    func) : false;
 
 if (software.yotsuba) {
-	const e_detail = e => e.detail || e.wrappedJSObject.detail// what?
-	document.addEventListener('QRPostSuccessful', e => postFlags(e_detail(e).postID));
-	document.addEventListener('4chanQRPostSuccess', e => postFlags(e_detail(e).postId));
+    const e_detail = e => e.detail || e.wrappedJSObject.detail;// what?
+    document.addEventListener('QRPostSuccessful', e => postFlags(e_detail(e).postID));
+    document.addEventListener('4chanQRPostSuccess', e => postFlags(e_detail(e).postId));
 
-	document.addEventListener('ThreadUpdate', e => {
-		const d = e_detail(e)
-		if (d[404]) return;
+    document.addEventListener('ThreadUpdate', e => {
+	const d = e_detail(e);
+	if (d[404]) return;
 
-		d.newPosts.forEach(post => postNrs.push(post.split('.')[1]));
+	d.newPosts.forEach(post => postNrs.push(post.split('.')[1]));
 
-		resolveFlags();
-	});
+	resolveFlags();
+    });
 
-	document.addEventListener('4chanThreadUpdated', e => {
-		const d = e_detail(e);
-		if (d.count <= 0) return;
-		
-		// Get the added posts in reverse order, take post numbers from ID
-		const posts = document.querySelectorAll('.postContainer');
-		for (let i = 0; i < d.count; i++) {
-			postNrs.push(posts[posts.length - 1 - i].id.substr(2));
-		}
-		
-		resolveFlags();
-	});
+    document.addEventListener('4chanThreadUpdated', e => {
+	const d = e_detail(e);
+	if (d.count <= 0) return;
+	
+	// Get the added posts in reverse order, take post numbers from ID
+	const posts = document.querySelectorAll('.postContainer');
+	for (let i = 0; i < d.count; i++) {
+	    postNrs.push(posts[posts.length - 1 - i].id.substr(2));
+	}
+	
+	resolveFlags();
+    });
 }
 
 if (software.nodegucaDoushio) {
-	const postFunc = () => {
-		postNrs.push(mutation.target.id);
+    const postFunc = () => {
+	postNrs.push(mutation.target.id);
+	resolveFlags();
+    };
+
+    const badNodes = ['HR', 'SECTION'];
+    
+    new MutationObserver(mutations => {
+	mutations.forEach(mutation => {
+	    if (mutation.addedNodes.length <= 0)
+		return; // We only care if something post was added
+	    
+	    const firstAddedNode = mutation.addedNodes[0].nodeName;
+
+	    // Enter a thread / change boards
+	    if (mutation.target.nodeName === 'THREADS') {
+		if (badNodes.includes(firstAddedNode))
+		    return; // We are in the index and a post was added, handled properly further down
+		
+		board_id = window.location.pathname.split('/')[1];
+		setTimeout(getPosts('section[id], article[id]'), 2000);
 		resolveFlags();
-	}
+		init();
+	    }
 
-	const badNodes = ['HR', 'SECTION'];
-	
-	new MutationObserver(mutations => {
-		mutations.forEach(mutation => {
-			if (mutation.addedNodes.length <= 0)
-				return; // We only care if something post was added
-			
-			const firstAddedNode = mutation.addedNodes[0].nodeName;
+	    // We post
+	    if (firstAddedNode === 'HEADER') {
+		postFlags(mutation.target.id, postFunc);
+	    }
 
-			// Enter a thread / change boards
-			if (mutation.target.nodeName === 'THREADS') {
-				if (badNodes.includes(firstAddedNode))
-					return; // We are in the index and a post was added, handled properly further down
-				
-				board_id = window.location.pathname.split('/')[1];
-				setTimeout(getPosts('section[id], article[id]'), 2000);
-				resolveFlags();
-				init();
-			}
-
-			// We post
-			if (firstAddedNode === 'HEADER') {
-				postFlags(mutation.target.id, postFunc)
-			}
-
-			// Someone else posts
-			if (firstAddedNode === 'ARTICLE') {
-				if (mutation.target.nodeName === 'BODY' || mutation.target.id === 'hover_overlay')
-					return; // User is hovering over a post
-				
-				postNrs.push(mutation.addedNodes[0].id);
-				setTimeout(resolveFlags, 1500);
-			}
-		});
-	}).observe(document.body, { childList: true, subtree: true });
+	    // Someone else posts
+	    if (firstAddedNode === 'ARTICLE') {
+		if (mutation.target.nodeName === 'BODY' || mutation.target.id === 'hover_overlay')
+		    return; // User is hovering over a post
+		
+		postNrs.push(mutation.addedNodes[0].id);
+		setTimeout(resolveFlags, 1500);
+	    }
+	});
+    }).observe(document.body, { childList: true, subtree: true });
 }
